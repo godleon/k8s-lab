@@ -1,0 +1,123 @@
+---
+
+- name: "Install GlusterFS cluster"
+  hosts: gfs_cluster
+  become: true
+  tasks:
+
+  - name: "Update APT repository for GlusterFS {{ glusterfs_version }}"
+    apt_repository:
+      repo: "ppa:gluster/glusterfs-{{ glusterfs_version }}"
+      state: "present"
+
+
+  - name: "Installing GlusterFS"
+    block:
+    - name: "Install GlusterFS"
+      apt:
+        name: "{{ item }}"
+        update_cache: yes
+      loop:
+      - "glusterfs-server"
+      - "thin-provisioning-tools"
+
+    - name: "Start glusterd.service"
+      systemd:
+        state: "started"
+        name: "glusterd"
+
+
+  - name: "Configure the trusted pool"
+    block:
+    - name: "Make sure all nodes can be reached via hostname"
+      lineinfile:
+        path: "/etc/hosts"
+        line: "{{ hostvars[item]['ansible_default_ipv4']['address'] }}  {{ hostvars[item]['ansible_hostname'] }}"
+      loop: "{{ groups['gfs_cluster'] | flatten(levels=1) }}"
+
+    - name: "Configure peear prob"
+      shell: "gluster peer probe {{ hostvars[item]['ansible_hostname'] }}"
+      loop: "{{ groups['gfs_cluster'] | flatten(levels=1) }}"
+      loop_control:
+        index_var: index
+      when: 
+      - ansible_hostname == hostvars['gfs01'].ansible_hostname
+      - hostvars[item]['ansible_hostname'] != hostvars['gfs01'].ansible_hostname
+      
+  
+  - name: "Install Heketi REST service"
+    block:
+    - name: "Install docker-ce"
+      include_role:
+        name: "godleon.docker"
+
+    - name: "Create directory for keeping Heketi configuration & data"
+      file:
+        path: "/srv/heketi/{{ item }}"
+        state: "directory"
+      with_items:
+      - "config"
+      - "db"
+
+    - name: "Copy SSH private key for accessing GlusterFS nodes"
+      copy:
+        src: "ssh-privkey/id_rsa"
+        dest: "/srv/heketi/config/id_rsa"
+        mode: "0600"
+
+    - name: "Prepare Heketi & topology configuration"
+      template:
+        src: "templates/{{ item }}"
+        dest: "/srv/heketi/config/{{ item }}"
+      loop:
+      - "heketi.json"
+      - "topology.json"
+
+    - name: "Configure proper file permission for Heketi container"
+      file:
+        path: "/srv/heketi"
+        owner: 1000
+        group: 1000
+        recurse: "yes"
+
+    - name: "Start Heketi REST service container"
+      shell: "{{ item }}"
+      loop:
+      - "docker stop heketi; docker rm heketi"
+      - "docker run --name heketi -d -p 8080:8080 -v /srv/heketi/config:/etc/heketi -v /srv/heketi/db:/var/lib/heketi heketi/heketi:latest"
+      ignore_errors: "yes" 
+    
+    when: ansible_hostname == hostvars['gfs01'].ansible_hostname
+
+
+  - name: "Create a cluster"                                     
+    block:
+    - name: "Get cluster list"
+      shell: "docker exec heketi heketi-cli --user admin --secret admin_key --json cluster list"
+      register: cmd_result    
+
+    - set_fact:
+        cluster_list: "{{ cmd_result.stdout | from_json }}"
+
+    - name: "Import topology if the cluster does not exist"
+      shell: "docker exec heketi heketi-cli --user admin --secret admin_key topology load --json=/etc/heketi/topology.json"
+      register: import_result
+      when: (cluster_list.clusters | length) == 0
+
+    - name: "Display topology import result"
+      debug:
+        var: import_result.stdout_lines
+      when: (cluster_list.clusters | length) == 0
+
+    - name: "Get cluster list again"
+      shell: "docker exec heketi heketi-cli --user admin --secret admin_key --json cluster list"
+      register: cmd_result    
+
+    - set_fact:
+        cluster_list: "{{ cmd_result.stdout | from_json }}"
+    
+    - name: "Display Cluster ID"
+      debug:
+        msg: "Cluster ID = {{ cluster_list.clusters[0] }}"
+
+    when: ansible_hostname == hostvars['gfs01'].ansible_hostname

@@ -1,0 +1,13 @@
+# Login information of GlusterFS nodes
+ansible_python_interpreter: /usr/bin/python3
+ansible_user: "ubuntu"
+ansible_become_user: "root"
+ansible_ssh_private_key_file: /k8s-lab/ansible/ssh-privkey/id_rsa
+
+# GlusterFS version
+glusterfs_version: "4.1"
+
+# disk list for storing data (not OS disk)
+storage_devs:
+- "/dev/vdb"
+- "/dev/vdc"

@@ -1,0 +1,5 @@
+gfs01   ansible_ssh_host="10.107.13.101"
+gfs02   ansible_ssh_host="10.107.13.102"
+
+[gfs_cluster]
+gfs0[1:2]

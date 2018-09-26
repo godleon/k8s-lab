@@ -1,0 +1,34 @@
+{
+  "clusters": [
+    {
+      "nodes": [
+{% for nd in groups['gfs_cluster'] %}
+        {
+          "node": {
+            "hostnames": {
+              "manage": [
+                "{{ hostvars[nd].ansible_ssh_host }}"
+              ],
+              "storage": [
+                "{{ hostvars[nd].ansible_ssh_host }}"
+              ]
+            },
+            "zone": 1
+          },
+          "devices": [
+{% for dev in storage_devs %}
+            {
+              "name": "{{ dev }}",
+              "destroydata": false
+            }{% if loop.index < (storage_devs | length) %},
+{% endif %}
+{% endfor %}            
+          ]
+        }{% if loop.index < (groups['gfs_cluster'] | length) %},
+{% endif %}
+{% endfor %}  
+      ]
+    }
+  ]
+}
+
